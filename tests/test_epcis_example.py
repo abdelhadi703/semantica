@@ -139,3 +139,80 @@ def test_input_that_cannot_be_walked_is_explained(sample, args, expected, capsys
 
     assert code == 2
     assert expected in capsys.readouterr().err
+
+
+def test_a_document_that_is_not_an_object_is_reported(sample, tmp_path, capsys):
+    document = tmp_path / "array.json"
+    document.write_text("[]", encoding="utf-8")
+
+    code = sample.main(["--events", str(document)])
+    stderr = capsys.readouterr().err
+
+    assert code == 2
+    assert "expected an object at the top" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_a_set_without_a_product_epc_is_reported(sample, tmp_path, capsys):
+    document = tmp_path / "productless.json"
+    document.write_text(
+        json.dumps(
+            {
+                "type": "EPCISDocument",
+                "schemaVersion": "2.0",
+                "epcisBody": {
+                    "eventList": [
+                        {
+                            "eventID": "urn:uuid:5f0f4a3e-0009-4a3e-9b1a-0000000000a9",
+                            "type": "ObjectEvent",
+                            "eventTime": "2026-09-02T08:12:00.000+02:00",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = sample.main(["--events", str(document)])
+    stderr = capsys.readouterr().err
+
+    assert code == 2
+    assert "mentions no product EPC" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_a_different_2x_version_is_rejected(sample, tmp_path, capsys):
+    events = sample.load_events(EVENTS)
+    document = tmp_path / "version-2-1.json"
+    document.write_text(
+        json.dumps(
+            {
+                "type": "EPCISDocument",
+                "schemaVersion": "2.1",
+                "epcisBody": {"eventList": events},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = sample.main(["--events", str(document)])
+    stderr = capsys.readouterr().err
+
+    assert code == 2
+    assert "this sample reads EPCIS 2.0" in stderr
+
+
+def test_jsonld_is_not_an_offered_format(sample):
+    # The exporter reifies the relationships, so the sample does not offer a
+    # format whose round trip it cannot check. argparse refuses it up front.
+    with pytest.raises(SystemExit):
+        sample.main(["--format", "jsonld"])
+
+
+def test_ntriples_round_trips(sample, tmp_path, capsys):
+    code = sample.main(["--format", "ntriples", "--out", str(tmp_path)])
+
+    assert code == 0
+    assert list(tmp_path.glob("*.nt"))
+    assert "read back and checked" in capsys.readouterr().out

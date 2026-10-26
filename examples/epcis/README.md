@@ -22,7 +22,10 @@ Passport written to <temp dir>/0614141.107346.2026.ttl
 Nothing is installed beyond what the core package already pulls in: `rdflib` is
 a core dependency, and the export goes through `RDFExporter.export_to_rdf()` in
 `semantica/export/rdf_exporter.py`. `--out` writes the passport where you want
-it, `--format` takes `turtle` (default), `jsonld` or `ntriples`.
+it, `--format` takes `turtle` (default) or `ntriples`. JSON-LD is not offered:
+the exporter's serializer turns the passport's relationships into their own
+nodes and writes event classes as `semantica:type`, so the chain links this
+sample checks would not survive the round trip.
 
 The event set holds two products. Asking for the second one gives its own,
 shorter chain:

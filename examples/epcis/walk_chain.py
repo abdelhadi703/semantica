@@ -86,18 +86,26 @@ def load_events(path: Path) -> List[Dict[str, Any]]:
             f"{path.name} is not valid JSON: {exc.msg} (line {exc.lineno})"
         )
 
+    if not isinstance(document, dict):
+        raise EpcisChainError(
+            f"{path.name} is not an EPCIS document: expected an object at the top, "
+            f"found {type(document).__name__}"
+        )
     if document.get("type") != "EPCISDocument":
         raise EpcisChainError(
             f"{path.name} is not an EPCIS document: expected type 'EPCISDocument', "
             f"found {document.get('type')!r}"
         )
     version = str(document.get("schemaVersion", ""))
-    if not version.startswith("2."):
+    if version != "2.0":
         raise EpcisChainError(
             f"{path.name} is EPCIS {version or 'of unknown version'}; this sample reads EPCIS 2.0"
         )
 
-    events = (document.get("epcisBody") or {}).get("eventList")
+    body = document.get("epcisBody")
+    if not isinstance(body, dict):
+        raise EpcisChainError(f"{path.name} has no epcisBody object")
+    events = body.get("eventList")
     if not isinstance(events, list) or not events:
         raise EpcisChainError(f"{path.name} has no epcisBody.eventList")
     return events
@@ -280,12 +288,18 @@ def render_passport(chain: List[Dict[str, Any]], epc: str) -> str:
     return "\n".join(lines)
 
 
-def read_back(graph_path: Path, chain: List[Dict[str, Any]], epc: str) -> int:
-    """Parse the passport we just wrote and check the links survived."""
+def read_back(
+    graph_path: Path, chain: List[Dict[str, Any]], epc: str, graph_format: str
+) -> int:
+    """Parse the passport we just wrote and check the links survived.
+
+    The parser has to match what was written: a Turtle parser reading a triple
+    file raises before any check runs.
+    """
     from rdflib import Graph, URIRef
 
     graph = Graph()
-    graph.parse(graph_path, format="turtle")
+    graph.parse(graph_path, format="nt" if graph_format == "ntriples" else graph_format)
 
     for event in chain:
         event_ref = URIRef(event["eventID"])
@@ -316,7 +330,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="the product to walk (default: the first one in the set)",
     )
     parser.add_argument(
-        "--format", default="turtle", choices=("turtle", "jsonld", "ntriples")
+        "--format",
+        default="turtle",
+        choices=("turtle", "ntriples"),
+        help=(
+            "passport syntax; JSON-LD is not offered because the exporter "
+            "reifies the relationships this sample checks"
+        ),
     )
     parser.add_argument(
         "--out", type=Path, default=None, help="where to write the passport"
@@ -329,6 +349,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_parents(events, by_id)
 
         available = products(events)
+        if not available:
+            raise EpcisChainError(
+                f"{args.events.name} mentions no product EPC in {', '.join(EPC_FIELDS)}"
+            )
         epc = args.epc or available[0]
         if epc not in available:
             raise EpcisChainError(
@@ -349,7 +373,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         graph_path = out_dir / f"{epc.rsplit(':', 1)[-1]}.{suffix}"
         graph_path.write_text(passport, encoding="utf-8")
 
-        triple_count = read_back(graph_path, chain, epc)
+        triple_count = read_back(graph_path, chain, epc, args.format)
         print(f"\nPassport written to {graph_path}")
         print(f"{triple_count} triples, {len(chain)} steps, read back and checked")
     except EpcisChainError as exc:
